@@ -84,7 +84,8 @@ def handle_message(event):
     # 会話開始コマンド
     if user_text == "日程を調整する":
         result = cohere_history.chat2("マッチングしたお相手の名前を教えてください", chat_history)
-
+        chouseisan_url = "https://chouseisan.com/"  # 例: 仮のリンク
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"日程調整をお願いします。：\n{chouseisan_url}\n+リンクを送ってください。"))
         for name in user_directory:
             requester_user_id = user_id
             if name in result:
