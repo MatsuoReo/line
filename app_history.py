@@ -72,10 +72,13 @@ def handle_message(event):
         return
 
     # 会話終了コマンド
-    if user_text == "会話を終了":
+    if user_text == "会話を終了する":
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
+        if chat_partner_user_id:
+            line_bot_api.push_message(chat_partner_user_id, TextSendMessage(text="お相手が会話を終了しました。"))
         is_chatting = False
         chat_partner_user_id = None
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
+        requester_user_id = None
         return
 
     # 会話開始コマンド
