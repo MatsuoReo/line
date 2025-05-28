@@ -5,7 +5,7 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import os
 import warnings
 import cohere_history
-
+import re
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -62,22 +62,23 @@ def callback():
     return "OK"
 
 
-import re
-
 def contains_link(text):
     return bool(re.search(r'https?://[^\s]+', text))
 
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    global is_chatting, chat_partner_user_id, requester_user_id, conversation_stage
+    global is_chatting, chat_partner_user_id, requester_user_id
 
     user_text = event.message.text
     user_id = event.source.user_id
     reply_token = event.reply_token
 
+    # 無視するトークン
     if reply_token == "00000000000000000000000000000000":
         return
 
+    # 会話終了コマンド
     if user_text == "会話を終了する":
         line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
         if chat_partner_user_id:
@@ -85,27 +86,27 @@ def handle_message(event):
         is_chatting = False
         chat_partner_user_id = None
         requester_user_id = None
-        conversation_stage = "idle"
         return
 
+    # 会話開始コマンド
     if user_text == "日程を調整する":
         result = cohere_history.chat2("マッチングしたお相手の名前を教えてください", chat_history)
-        chouseisan_url = "https://chouseisan.com/"
-        line_bot_api.reply_message(reply_token, TextSendMessage(
-            text=f"日程調整をお願いします：\n{chouseisan_url}\nリンクを送ってください。"
-        ))
+        chouseisan_url = "https://chouseisan.com/"  # 例: 仮のリンク
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"日程調整をお願いします。：\n{chouseisan_url}\n+リンクを送ってください。"))
 
         for name in user_directory:
             requester_user_id = user_id
             if name in result:
                 chat_partner_user_id = user_directory[name]
-                conversation_stage = "waiting_for_link"
+                is_chatting = True
+                line_bot_api.reply_message(reply_token, TextSendMessage("会話を開始します。"))
+                line_bot_api.push_message(chat_partner_user_id,TextSendMessage(text="あなたとお話ししたい人がいます！"))
+
                 return
 
         line_bot_api.reply_message(reply_token, TextSendMessage(text="適切なマッチング相手が見つかりませんでした。"))
         return
 
-    # 🔽ここが追加された処理（リンク検知 → 相手に送信）
     if conversation_stage == "waiting_for_link" and contains_link(user_text):
         is_chatting = True
         conversation_stage = "chatting"
@@ -115,15 +116,21 @@ def handle_message(event):
         line_bot_api.push_message(requester_user_id, TextSendMessage(text="マッチ相手にリンクを送りました。1on1をどうぞ。"))
         return
 
-    # チャット中のメッセージ転送
+    # チャット中なら相手に転送
     if is_chatting and chat_partner_user_id:
         if user_id == chat_partner_user_id:
-            line_bot_api.push_message(requester_user_id, TextSendMessage(text=f"お相手からのメッセージ：\n{user_text}"))
+            # マッチした人 → お願いした人 への転送
+            line_bot_api.push_message(requester_user_id,TextSendMessage(text=f"お相手からのメッセージ：\n{user_text}"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="メッセージを転送しました。"))
         else:
-            line_bot_api.push_message(chat_partner_user_id, TextSendMessage(text=f"お相手からのメッセージ：\n{user_text}"))
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="メッセージを転送しました。"))
-        return
+        # お願いした人 → マッチした人 への転送
+            line_bot_api.push_message(chat_partner_user_id,TextSendMessage(text=f"お相手からのメッセージ：\n{user_text}"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="メッセージを転送しました。"))
+    else:
+        # Cohereによる通常応答
+        response = cohere_history.chat2(user_text, chat_history)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=response))
 
-    # 通常応答
-    response = cohere_history.chat2(user_text, chat_history)
-    line_bot_api.reply_message(reply_token, TextSendMessage(text=response))
+if __name__ == "__main__":
+    app.run(host="localhost", port=8000)
+
