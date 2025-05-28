@@ -72,18 +72,19 @@ def handle_message(event):
         return
 
     # 会話終了コマンド
-    if user_text == "会話を終了":
+    if user_text == "会話を終了する":
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
+        if chat_partner_user_id:
+            line_bot_api.push_message(chat_partner_user_id, TextSendMessage(text="お相手が会話を終了しました。"))
         is_chatting = False
         chat_partner_user_id = None
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
+        requester_user_id = None
         return
 
     # 会話開始コマンド
     if user_text == "日程を調整する":
-        chouseisan_url = "https://chouseisan.com/"
-        line_bot_api.reply_message(reply_token, TextSendMessage(
-        text=f"日程調整はこちらからお願いします。設定が終わりましたら、リンクを送って欲しいです。\n{chouseisan_url}"))
         result = cohere_history.chat2("マッチングしたお相手の名前を教えてください", chat_history)
+
         for name in user_directory:
             requester_user_id = user_id
             if name in result:
@@ -97,7 +98,7 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text="適切なマッチング相手が見つかりませんでした。"))
         return
 
-    # チャット中なら相手に転送｀
+    # チャット中なら相手に転送
     if is_chatting and chat_partner_user_id:
         if user_id == chat_partner_user_id:
             # マッチした人 → お願いした人 への転送
