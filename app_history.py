@@ -5,7 +5,6 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import os
 import warnings
 import cohere_history
-import re
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -20,7 +19,6 @@ is_chatting = False
 chat_partner_user_id = None
 requester_user_id = None
 chat_history = []
-conversation_stage = "idle"
 
 # ユーザーIDと名前の対応辞書（仮のIDで埋めてあります）
 user_directory = {
@@ -61,14 +59,9 @@ def callback():
 
     return "OK"
 
-
-def contains_link(text):
-    return bool(re.search(r'https?://[^\s]+', text))
-
-
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    global is_chatting, chat_partner_user_id, requester_user_id,conversation_stage
+    global is_chatting, chat_partner_user_id, requester_user_id
 
     user_text = event.message.text
     user_id = event.source.user_id
@@ -79,21 +72,18 @@ def handle_message(event):
         return
 
     # 会話終了コマンド
-    if user_text == "会話を終了する":
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
-        if chat_partner_user_id:
-            line_bot_api.push_message(chat_partner_user_id, TextSendMessage(text="お相手が会話を終了しました。"))
+    if user_text == "会話を終了":
         is_chatting = False
         chat_partner_user_id = None
-        requester_user_id = None
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
         return
 
     # 会話開始コマンド
     if user_text == "日程を調整する":
+        chouseisan_url = "https://chouseisan.com/"
+        line_bot_api.reply_message(reply_token, TextSendMessage(
+        text=f"日程調整はこちらからお願いします。設定が終わりましたら、リンクを送って欲しいです。\n{chouseisan_url}"))
         result = cohere_history.chat2("マッチングしたお相手の名前を教えてください", chat_history)
-        chouseisan_url = "https://chouseisan.com/"  # 例: 仮のリンク
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"日程調整をお願いします。：\n{chouseisan_url}\n+リンクを送ってください。"))
-
         for name in user_directory:
             requester_user_id = user_id
             if name in result:
@@ -107,16 +97,7 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text="適切なマッチング相手が見つかりませんでした。"))
         return
 
-    if conversation_stage == "waiting_for_link" and contains_link(user_text):
-        is_chatting = True
-        conversation_stage = "chatting"
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="リンクを確認しました。会話を開始します。"))
-        line_bot_api.push_message(chat_partner_user_id, TextSendMessage(text=f"こちらの日程調整リンクをご確認ください：\n{user_text}"))
-        line_bot_api.push_message(chat_partner_user_id, TextSendMessage(text="お相手と1on1チャットを開始しました。"))
-        line_bot_api.push_message(requester_user_id, TextSendMessage(text="マッチ相手にリンクを送りました。1on1をどうぞ。"))
-        return
-
-    # チャット中なら相手に転送
+    # チャット中なら相手に転送｀
     if is_chatting and chat_partner_user_id:
         if user_id == chat_partner_user_id:
             # マッチした人 → お願いした人 への転送
@@ -133,4 +114,3 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run(host="localhost", port=8000)
-
