@@ -1,6 +1,6 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError, LineBotApiError
+from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import os
 import warnings
@@ -14,11 +14,13 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.getenv("MSG_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-# 会話状態：複数組を対応させる
-chat_sessions = {}  # user_id: {"partner_id": ..., "role": "requester"/"partner"}
+# 状態管理（グローバル変数）
+is_chatting = False
+chat_partner_user_id = None
+requester_user_id = None
 chat_history = []
 
-# 名前とLINE IDの対応辞書
+# ユーザーIDと名前の対応辞書（仮のIDで埋めてあります）
 user_directory = {
     "渡辺": "U560934a6fdec52e72ff0275b205bfe2d",
     "五十嵐": "U22222222222222222222222222222222",
@@ -59,55 +61,52 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_id = event.source.user_id
+    global is_chatting, chat_partner_user_id, requester_user_id
+
     user_text = event.message.text
+    user_id = event.source.user_id
     reply_token = event.reply_token
 
+    # 無視するトークン
     if reply_token == "00000000000000000000000000000000":
         return
 
     # 会話終了コマンド
     if user_text == "会話を終了":
-        if user_id in chat_sessions:
-            partner_id = chat_sessions[user_id]["partner_id"]
-            del chat_sessions[user_id]
-            del chat_sessions[partner_id]
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
-            line_bot_api.push_message(partner_id, TextSendMessage(text="お相手が会話を終了しました。"))
-        else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="現在会話中ではありません。"))
+        is_chatting = False
+        chat_partner_user_id = None
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を終了しました。"))
         return
 
     # 会話開始コマンド
     if user_text == "日程を調整する":
         result = cohere_history.chat2("マッチングしたお相手の名前を教えてください", chat_history)
-        for name in user_directory:
-            if name in result:
-                partner_id = user_directory[name]
-                # セッションに追加
-                chat_sessions[user_id] = {"partner_id": partner_id, "role": "requester"}
-                chat_sessions[partner_id] = {"partner_id": user_id, "role": "partner"}
 
-                line_bot_api.reply_message(reply_token, TextSendMessage(text="会話を開始します。"))
-                try:
-                    line_bot_api.push_message(partner_id, TextSendMessage(text="あなたとお話ししたい人がいます！"))
-                except LineBotApiError as e:
-                    print("LINE送信失敗:", e)
+        for name in user_directory:
+            requester_user_id = user_id
+            if name in result:
+                chat_partner_user_id = user_directory[name]
+                is_chatting = True
+                line_bot_api.reply_message(reply_token, TextSendMessage("会話を開始します。"))
+                line_bot_api.push_message(chat_partner_user_id,TextSendMessage(text="あなたとお話ししたい人がいます！"))
+
                 return
+
         line_bot_api.reply_message(reply_token, TextSendMessage(text="適切なマッチング相手が見つかりませんでした。"))
         return
 
-    # 通常の会話（相手に転送）
-    if user_id in chat_sessions:
-        partner_id = chat_sessions[user_id]["partner_id"]
-        try:
-            line_bot_api.push_message(partner_id, TextSendMessage(text=f"お相手からのメッセージ：\n{user_text}"))
+    # チャット中なら相手に転送
+    if is_chatting and chat_partner_user_id:
+        if user_id == chat_partner_user_id:
+            # マッチした人 → お願いした人 への転送
+            line_bot_api.push_message(requester_user_id,TextSendMessage(text=f"お相手からのメッセージ：\n{user_text}"))
             line_bot_api.reply_message(reply_token, TextSendMessage(text="メッセージを転送しました。"))
-        except LineBotApiError as e:
-            print("LINE送信失敗:", e)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="送信エラーが発生しました。"))
+        else:
+        # お願いした人 → マッチした人 への転送
+            line_bot_api.push_message(chat_partner_user_id,TextSendMessage(text=f"お相手からのメッセージ：\n{user_text}"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="メッセージを転送しました。"))
     else:
-        # AI通常応答（会話ペアがないとき）
+        # Cohereによる通常応答
         response = cohere_history.chat2(user_text, chat_history)
         line_bot_api.reply_message(reply_token, TextSendMessage(text=response))
 
