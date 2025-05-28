@@ -68,7 +68,7 @@ def contains_link(text):
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    global is_chatting, chat_partner_user_id, requester_user_id
+    global is_chatting, chat_partner_user_id, requester_user_id,conversation_stage
 
     user_text = event.message.text
     user_id = event.source.user_id
